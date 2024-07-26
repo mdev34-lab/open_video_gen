@@ -20,7 +20,7 @@ OpenVideoGen is an automated video generation tool built with Python 3.11. This 
 To install OpenVideoGen, clone this repository and install the required dependencies:
 
 ```
-git clone https://github.com/yourusername/OpenVideoGen.git
+git clone https://github.com/mdev34-lab/OpenVideoGen.git
 cd OpenVideoGen
 pip install -r requirements.txt
 ```
