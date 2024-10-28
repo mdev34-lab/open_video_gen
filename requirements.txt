@@ -1,0 +1,8 @@
+argparse
+numpy
+Pillow
+matplotlib
+gTTS
+loguru
+moviepy
+opencv-python
