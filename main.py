@@ -1,6 +1,9 @@
+#!/usr/bin/env python3
+
 import argparse
 import tempfile
 from os.path import abspath, dirname
+import os  # Ensure os is imported for os.path.join
 from typing import List, Tuple, Optional
 import logging
 import sys
@@ -13,28 +16,29 @@ from gtts import gTTS
 from loguru import logger
 from moviepy import editor as mv
 from moviepy.config import change_settings
+import cv2 as cv # Keep this to force people to install opencv-python
 
 # The star of the show: VideoMaker class.
 class VideoMaker:
     ROOT_DIR = abspath(dirname(__file__))
-    CHAR_DIR = f"{ROOT_DIR}\\character\\"
-    STATICS_DIR = f"{ROOT_DIR}\\statics\\"
+    CHAR_DIR = os.path.join(ROOT_DIR, "character")  # Correct usage of os.path.join
+    STATICS_DIR = os.path.join(ROOT_DIR, "statics")  # Correct usage of os.path.join
 
     # Sprite cache.
     SPRITES = {
-        "anger": mv.ImageClip(f"{CHAR_DIR}anger.png"),
-        "anger_screaming": mv.ImageClip(f"{CHAR_DIR}anger_screaming.png"),
-        "fearful": mv.ImageClip(f"{CHAR_DIR}fearful.png"),
-        "frown": mv.ImageClip(f"{CHAR_DIR}frown.png"),
-        "greedy": mv.ImageClip(f"{CHAR_DIR}greedy.png"),
-        "happy_screaming": mv.ImageClip(f"{CHAR_DIR}happy_screaming.png"),
-        "happy": mv.ImageClip(f"{CHAR_DIR}happy.png"),
-        "joy": mv.ImageClip(f"{CHAR_DIR}joy.png"),
-        "mischief": mv.ImageClip(f"{CHAR_DIR}mischief.png"),
-        "smile": mv.ImageClip(f"{CHAR_DIR}smile.png"),
-        "speaking_low": mv.ImageClip(f"{CHAR_DIR}speaking_low.png"),
-        "speaking_medium": mv.ImageClip(f"{CHAR_DIR}speaking_medium.png"),
-        "worried": mv.ImageClip(f"{CHAR_DIR}worried.png"),
+        "anger": mv.ImageClip(os.path.join(CHAR_DIR, "anger.png")),  # Correct usage of os.path.join
+        "anger_screaming": mv.ImageClip(os.path.join(CHAR_DIR, "anger_screaming.png")),  # Correct usage of os.path.join
+        "fearful": mv.ImageClip(os.path.join(CHAR_DIR, "fearful.png")),  # Correct usage of os.path.join
+        "frown": mv.ImageClip(os.path.join(CHAR_DIR, "frown.png")),  # Correct usage of os.path.join
+        "greedy": mv.ImageClip(os.path.join(CHAR_DIR, "greedy.png")),  # Correct usage of os.path.join
+        "happy_screaming": mv.ImageClip(os.path.join(CHAR_DIR, "happy_screaming.png")),  # Correct usage of os.path.join
+        "happy": mv.ImageClip(os.path.join(CHAR_DIR, "happy.png")),  # Correct usage of os.path.join
+        "joy": mv.ImageClip(os.path.join(CHAR_DIR, "joy.png")),  # Correct usage of os.path.join
+        "mischief": mv.ImageClip(os.path.join(CHAR_DIR, "mischief.png")),  # Correct usage of os.path.join
+        "smile": mv.ImageClip(os.path.join(CHAR_DIR, "smile.png")),  # Correct usage of os.path.join
+        "speaking_low": mv.ImageClip(os.path.join(CHAR_DIR, "speaking_low.png")),  # Correct usage of os.path.join
+        "speaking_medium": mv.ImageClip(os.path.join(CHAR_DIR, "speaking_medium.png")),  # Correct usage of os.path.join
+        "worried": mv.ImageClip(os.path.join(CHAR_DIR, "worried.png")),  # Correct usage of os.path.join
     }
 
     def __init__(self, script_path: str, output_path: Optional[str] = None) -> None:
@@ -123,7 +127,7 @@ class VideoMaker:
 
     @staticmethod
     def create_initial_background_clip(duration: int) -> mv.ImageClip:
-        return mv.ImageClip(f"{VideoMaker.STATICS_DIR}bg_white.png").set_duration(duration)
+        return mv.ImageClip(os.path.join(VideoMaker.STATICS_DIR, "bg_white.png")).set_duration(duration)  # Corrected path
 
     def add_emotion_clip(self, emotion_name: str, duration: float) -> float:
         """
@@ -202,51 +206,46 @@ class VideoMaker:
     def add_textspeech_clip(self, text: str, duration: float = None, newline_threshold: int = 8) -> float:
         """
         Adds a text-to-speech clip to the video using PIL for text rendering.
-
-        Args:
-            text (str): The text to convert to speech and display.
-            duration (float, optional): The duration of the clip. If not provided, the duration of the text-to-speech clip will be used.
-
-        Returns:
-            float: The updated current time of the video.
+        Improved error handling and logging added.
         """
-        # Convert the given text to speech and get the resulting clip and its duration.
-        tts_clip, tts_duration = VideoMaker.google_tts_to_clip(text, self.current_time, duration)
-        # If a duration is not provided, use the duration of the text-to-speech clip.
-        text_duration = duration if duration else tts_duration
-        # Create a PIL Image
-        img = Image.new('RGB', (1920, 1080), color='white')
-        draw = ImageDraw.Draw(img)
-        # Load a font
-        font = ImageFont.truetype(self.current_font, 70)
+        try:
+            tts_clip, tts_duration = VideoMaker.google_tts_to_clip(text, self.current_time, duration)
+            # Create a PIL Image
+            img = Image.new('RGB', (1920, 1080), color='white')
+            draw = ImageDraw.Draw(img)
+            # Load a font
+            font = ImageFont.truetype(self.current_font, 70)
 
-        # For each newline_threshold words in the text (using .split()), 
-        # insert a newline into the text
-        words = text.split()
-        new_text = ""
-        for i in range(0, len(words), newline_threshold):
-            new_text += " ".join(words[i:i+newline_threshold]) + "\n"
-        text = new_text
+            # For each newline_threshold words in the text (using .split()), 
+            # insert a newline into the text
+            words = text.split()
+            new_text = ""
+            for i in range(0, len(words), newline_threshold):
+                new_text += " ".join(words[i:i+newline_threshold]) + "\n"
+            text = new_text
 
-        # Calculate text position to center it
-        text_width, text_height = draw.textbbox((0, 0), text, font=font)[2:]
-        position = ((1920 - text_width) / 2, (1080 - text_height) / 2)
-        # Draw the text
-        draw.text(position, text, font=font, fill='black')
-        # Convert PIL Image to numpy array
-        img_array = np.array(img)
-        # Create a MoviePy clip from the numpy array
-        text_clip = mv.ImageClip(img_array).set_duration(text_duration)
-        # Add fade in and fade out effects
-        text_clip = text_clip.fadeout(0.5).fadein(0.5)
-        # Set the start time and audio
-        text_clip = text_clip.set_start(self.current_time).set_audio(tts_clip.audio)
-        # Add the text clip to the list of clips.
-        self.clips.append(text_clip)
-        # Update the current time of the video by adding the duration of the text clip.
-        self.current_time += text_duration
-        # Return the updated current time of the video.
-        return self.current_time
+            # Calculate text position to center it
+            text_width, text_height = draw.textbbox((0, 0), text, font=font)[2:]
+            position = ((1920 - text_width) / 2, (1080 - text_height) / 2)
+            # Draw the text
+            draw.text(position, text, font=font, fill='black')
+            # Convert PIL Image to numpy array
+            img_array = np.array(img)
+            # Create a MoviePy clip from the numpy array
+            text_clip = mv.ImageClip(img_array).set_duration(tts_duration)
+            # Add fade in and fade out effects
+            text_clip = text_clip.fadeout(0.5).fadein(0.5)
+            # Set the start time and audio
+            text_clip = text_clip.set_start(self.current_time).set_audio(tts_clip.audio)
+            # Add the text clip to the list of clips.
+            self.clips.append(text_clip)
+            # Update the current time of the video by adding the duration of the text clip.
+            self.current_time += tts_duration
+            # Return the updated current time of the video.
+            return self.current_time
+        except Exception as e:
+            logger.error(f"Error adding textspeech clip: {e}")
+            raise
 
     def add_insert_clip(self, video_path: str) -> float:
         """
