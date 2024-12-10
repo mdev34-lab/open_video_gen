@@ -22,7 +22,6 @@ from loguru import logger
 from moviepy import *
 import cv2 as cv
 
-
 # The star of the show: VideoMaker class.
 class VideoMaker:
     ROOT_DIR = abspath(dirname(__file__))
@@ -36,7 +35,8 @@ class VideoMaker:
     CHARACTERS: tuple = tuple(SPRITES.keys())
     # Get a estimate of the character size
     CHARACTER_AVERAGE_SIZE: tuple = utils.get_character_average_size(CHARACTER_IMAGES)
-
+    # Define the RESOLUTION constant
+    RESOLUTION = (1920, 1080)
     TTS_VOICE = "en-US-AndrewMultilingualNeural"
 
     def __init__(self, script_path: str, output_path: Optional[str] = None) -> None:
@@ -72,8 +72,7 @@ class VideoMaker:
         """
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_audio_file:
             # Convert text to speech using Google TTS
-            comm = edge_tts.Communicate(text=text, voice=VideoMaker.TTS_VOICE)
-            await comm.save(tmp_audio_file.name)
+            await utils.edge_tts_to_audiofile(text, VideoMaker.TTS_VOICE, tmp_audio_file.name)
 
             # Define the TTS clip and its duration
             audio_clip = AudioFileClip(tmp_audio_file.name)
@@ -84,14 +83,14 @@ class VideoMaker:
                 clip_duration = audio_duration
             elif audio_duration > duration:
                 # If the audio duration is longer than the specified duration, trim it
-                audio_clip = audio_clip.subclip(0, duration)
+                audio_clip: AudioClip = audio_clip.subclipped(0, duration)
                 clip_duration = duration
             else:
                 # If the audio duration is shorter than the specified duration, use the audio duration
                 clip_duration = audio_duration
 
             # Create a black video clip with the same duration as the audio clip
-            video_clip = ColorClip(size=(1, 1), color=(0, 0, 0)).with_duration(clip_duration)
+            video_clip = utils.BlackClip((1, 1)).with_duration(clip_duration)
 
             # Combine the video and audio clips
             composite_clip = video_clip.with_audio(audio_clip)
@@ -107,18 +106,24 @@ class VideoMaker:
             return script_file.read()
 
     @staticmethod
-    def parse_start_command(script: str) -> int:
+    def parse_start_command(script: str) -> Tuple[int, Tuple[int, int]]:
         if not script.splitlines()[0].lower().startswith("[start"):
             raise VideoMaker.InvalidScriptError("The first line of the script must be '[START]'.")
         else:
             try:
-                return int(utils.remove_affix(script.splitlines()[0], ("[", "]")).split(" ")[1])
-            except IndexError:
-                raise VideoMaker.InvalidScriptError("Duration not defined in '[START]' command. Example: '[START 5]'")
+                command = utils.remove_affix(script.splitlines()[0], ("[", "]")).split(" ")
+                duration = int(command[1])
+                if len(command) > 2:
+                    resolution = tuple(map(int, command[2].split("x")))
+                else:
+                    resolution = VideoMaker.RESOLUTION  # Default resolution
+                return duration, resolution
+            except (IndexError, ValueError):
+                raise VideoMaker.InvalidScriptError("Invalid '[START]' command. Example: '[START 5 1920x1080]'")
 
     @staticmethod
-    def create_initial_background_clip(duration: int) -> ImageClip:
-        return utils.WhiteClip((1920, 1080)).with_duration(duration)  # Corrected path
+    def create_initial_background_clip(duration: int, resolution: Tuple[int, int]) -> ImageClip:
+        return utils.WhiteClip(resolution).with_duration(duration)
 
     def add_emotion_clip(self, emotion_name: str, duration: float) -> float:
         """
@@ -133,17 +138,18 @@ class VideoMaker:
         """
         # Get the emotion clip from the SPRITES dictionary based on the emotion name.
         emotion_clip = CharacterClip(emotion_name, \
-                                     VideoMaker.CHARACTERS, \
-                                     VideoMaker.CHAR_DIR, \
-                                     duration=duration)
-        emotion_clip = emotion_clip.resized(VideoMaker.CHARACTER_AVERAGE_SIZE)
+                                    VideoMaker.CHARACTERS, \
+                                    VideoMaker.CHAR_DIR, \
+                                    duration=duration)
         
-        # Calculate the height of the emotion clip by dividing its height by 1.4.
-        emotion_height = int(emotion_clip.h // 1.4)
+        # Calculate the character's size based on the resolution.
+        # For example, you can use a fixed ratio of the character's size to the resolution.
+        character_size_ratio = 0.1  # Adjust this value to change the character's size.
+        character_width = int(self.RESOLUTION[0] * character_size_ratio)
+        character_height = int(self.RESOLUTION[1] * character_size_ratio)
         
-        # Resize the emotion clip to the calculated height and set its position to the bottom right of the video.
-        # Also apply margins to the emotion clip to position it correctly.
-        emotion_clip = emotion_clip.resized(height=emotion_height)\
+        # Resize the emotion clip to the calculated size.
+        emotion_clip = emotion_clip.resized(width=character_width, height=character_height)\
             .with_position("bottom", "right")\
             .with_effects([vfx.Margin(bottom=10, left=1500, opacity=0)])
         
@@ -214,7 +220,7 @@ class VideoMaker:
             # Await the coroutine to get the actual result
             tts_clip, tts_duration = await VideoMaker.edge_tts_to_clip(text, self.current_time, duration)
             # Create a PIL Image
-            img = Image.new('RGB', (1920, 1080), color='white')
+            img = Image.new('RGB', VideoMaker.RESOLUTION, color='white')  # Use RESOLUTION constant
             draw = ImageDraw.Draw(img)
             # Load a font
             font = ImageFont.truetype(self.current_font, 70)
@@ -229,7 +235,7 @@ class VideoMaker:
 
             # Calculate text position to center it
             text_width, text_height = draw.textbbox((0, 0), text, font=font)[2:]
-            position = ((1920 - text_width) / 2, (1080 - text_height) / 2)
+            position = ((VideoMaker.RESOLUTION[0] - text_width) / 2, (VideoMaker.RESOLUTION[1] - text_height) / 2)  # Use RESOLUTION constant
             # Draw the text
             draw.text(position, text, font=font, fill='black')
             # Convert PIL Image to numpy array
@@ -307,9 +313,9 @@ class VideoMaker:
         # Read the script.
         script = VideoMaker.read_script(self.script_path)
         # Get the initial background duration from the script.
-        initial_duration = VideoMaker.parse_start_command(script)
+        initial_duration, VideoMaker.RESOLUTION = VideoMaker.parse_start_command(script)
         # Create the initial background clip.
-        bg_clip = VideoMaker.create_initial_background_clip(initial_duration)
+        bg_clip = VideoMaker.create_initial_background_clip(initial_duration, VideoMaker.RESOLUTION)
         video_width, video_height = bg_clip.size  # Get video dimensions
         # Add the background clip to the list of clips.
         self.clips.append(bg_clip)
@@ -405,3 +411,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
