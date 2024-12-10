@@ -122,7 +122,7 @@ class VideoMaker:
 
     @staticmethod
     def create_initial_background_clip(duration: int) -> ImageClip:
-        return ImageClip(os.path.join(VideoMaker.STATICS_DIR, "bg_white.png")).with_duration(duration)  # Corrected path
+        return utils.WhiteClip((1920, 1080)).with_duration(duration)  # Corrected path
 
     def add_emotion_clip(self, emotion_name: str, duration: float) -> float:
         """
@@ -136,7 +136,11 @@ class VideoMaker:
             float: The updated current time of the video.
         """
         # Get the emotion clip from the SPRITES dictionary based on the emotion name.
-        emotion_clip = CharacterClip(emotion_name, duration=duration)
+        emotion_clip = CharacterClip(emotion_name, \
+                                     VideoMaker.CHARACTERS, \
+                                     VideoMaker.CHAR_DIR, \
+                                     duration=duration)
+        emotion_clip = emotion_clip.resized(VideoMaker.CHARACTER_AVERAGE_SIZE)
         
         # Calculate the height of the emotion clip by dividing its height by 1.4.
         emotion_height = int(emotion_clip.h // 1.4)
@@ -171,23 +175,26 @@ class VideoMaker:
         Returns:
             float: The updated current time of the video.
         """
-        # Convert the text to speech and get the resulting clip and its duration.
         tts_clip, tts_duration = VideoMaker.google_tts_to_clip(text, self.current_time, duration)
         
         # If a duration is not provided, use the duration of the text-to-speech clip.
         emotion_duration = duration if duration else tts_duration
         
-        # Get the emotion clip from the SPRITES dictionary based on the emotion name.
-        emotion_clip = CharacterClip(emotion_name, duration=emotion_duration)
+        # Ensure the emotion clip is created with the correct duration
+        emotion_clip = CharacterClip(emotion_name, VideoMaker.CHARACTERS, VideoMaker.CHAR_DIR, duration=emotion_duration)
+        emotion_clip = emotion_clip.resized(VideoMaker.CHARACTER_AVERAGE_SIZE)
         
         # Calculate the height of the emotion clip by dividing its height by 1.4.
-        emotion_height = int(emotion_clip.h // 1.4)
+        emotion_height = int(emotion_clip.h // 1.4) - 50
         
         # Resize the emotion clip to the calculated height and set its position to the bottom right of the video.
         # Also apply margins to the emotion clip to position it correctly.
+        video_width, video_height = self.clips[0].w, self.clips[0].h
+        character_width = emotion_clip.w
+        left_margin = video_width - character_width - 100  # 100 pixels from the right edge
         emotion_clip = emotion_clip.resized(height=emotion_height)\
             .with_position("bottom", "right")\
-            .with_effects([vfx.Margin(bottom=10, left=1500, opacity=0)])
+            .with_effects([vfx.Margin(bottom=10, left=left_margin, opacity=0)])
         
         # Set the start time of the emotion clip to the current time of the video.
         emotion_clip = emotion_clip.with_start(self.current_time)
@@ -272,30 +279,25 @@ class VideoMaker:
         return self.current_time
 
     def export_final_video(self, save_path: str, fps: int):
-        """
-        Exports the final video as a single file.
-
-        Args:
-            save_path (str): The path to save the final video.
-            fps (int): The frames per second of the final video.
-
-        Raises:
-            OSError: If there is an error exporting the video (e.g. invalid file type).
-        """
         try:
-            # Create a new CompositeVideoClip from the list of clips.
             final_video = CompositeVideoClip(self.clips)
-
-            # Export the final video to the given path, with the given fps, using 32 threads and the libx264 codec.
             final_video.write_videofile(save_path, fps=fps, threads=32, codec='libx264')
-
-            # Log a success message, including the path and fps of the final video.
             logger.info(f"Final video '{save_path}' exported at {fps} FPS.")
         except OSError as e:
-            # If the error is that there is no suitable output format, log an error message and exit with code 1.
             if "unable to find a suitable output format" in str(e).lower():
-                logger.error("Output format error: Invalid output file type. Try again with a different file type (e.g. .mp4).")
+                logger.error("Output format error: Invalid output file type.")
                 exit(1)
+        finally:
+            # Close all clips
+            for clip in self.clips:
+                try:
+                    clip.close()
+                except:
+                    pass
+            try:
+                final_video.close()
+            except:
+                pass
 
     def process_script(self):
         """
@@ -314,6 +316,7 @@ class VideoMaker:
         initial_duration = VideoMaker.parse_start_command(script)
         # Create the initial background clip.
         bg_clip = VideoMaker.create_initial_background_clip(initial_duration)
+        video_width, video_height = bg_clip.size  # Get video dimensions
         # Add the background clip to the list of clips.
         self.clips.append(bg_clip)
 

@@ -26,7 +26,7 @@ class WhiteClip(ColorClip):
         super().__init__(size=size, color=(255, 255, 255), *args, **kwargs)
 
 class CharacterClip(ImageClip):
-    def __init__(self, character, CHARACTERS: tuple, CHARACTER_IMAGES_FOLDER: str, size: tuple[int, int] = None, *args, **kwargs):
+    def __init__(self, character, CHARACTERS: tuple, CHARACTER_IMAGES_FOLDER: str, *args, **kwargs):
         if character not in CHARACTERS:
             raise ValueError(f"Character '{character}' not in {CHARACTERS}")
         super().__init__(os.path.join(CHARACTER_IMAGES_FOLDER, f"{character}.png"), *args, **kwargs)
