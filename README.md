@@ -51,7 +51,8 @@ python openvideogen.py script.txt
 
 ## Script Commands
 
-- `[START duration]`: Begins the video with specified duration in seconds
+- `[START duration <width>x<height>]`: Begins the video with specified duration in seconds (mandatory) and resolution (optional)
+- `[INSERT filepath]`: Insert the specified sub-video into the video (not tested)
 - `[EMOTION type intensity]`: Sets the emotion for the following lines
 - `[ESPEECH style auto]`: Applies emotional speech with specified style
 - `[TEXTSPEECH auto]`: Converts text to speech
