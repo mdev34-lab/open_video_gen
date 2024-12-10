@@ -7,6 +7,7 @@ import logging
 import sys
 import numpy as np
 import re
+import asyncio  # Add this import at the top of your file
 
 import utils
 from utils import CharacterClip
@@ -16,7 +17,7 @@ from typing import List, Tuple, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 import matplotlib.font_manager as fm
-from gtts import gTTS
+import edge_tts
 from loguru import logger
 from moviepy import *
 import cv2 as cv
@@ -36,6 +37,8 @@ class VideoMaker:
     # Get a estimate of the character size
     CHARACTER_AVERAGE_SIZE: tuple = utils.get_character_average_size(CHARACTER_IMAGES)
 
+    TTS_VOICE = "en-US-AndrewMultilingualNeural"
+
     def __init__(self, script_path: str, output_path: Optional[str] = None) -> None:
         """
         Initialize VideoMaker instance.
@@ -47,23 +50,15 @@ class VideoMaker:
         """
         self.script_path = script_path
         self.output_path = output_path
+        # Initialize the current font
         self.current_font = fm.findfont(fm.FontProperties(family="Arial"))
         self.clips = []
         self.current_time = 0
 
-    class InvalidScriptError(Exception):
-        pass
-
     @staticmethod
-    def remove_affix(text: str, affixes: Tuple[str]) -> str:
-        for affix in affixes:
-            text = text.replace(affix, "")
-        return text
-
-    @staticmethod
-    def google_tts_to_clip(text: str, start_time: float, duration: float = None) -> Tuple[VideoClip, float]:
+    async def edge_tts_to_clip(text: str, start_time: float, duration: float = None) -> Tuple[VideoClip, float]:
         """
-        Convert text to speech using Google TTS and convert it to a MoviePy clip
+        Convert text to speech using Azure TTS and convert it to a MoviePy clip
         with the specified start time and duration.
 
         Args:
@@ -77,9 +72,10 @@ class VideoMaker:
         """
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_audio_file:
             # Convert text to speech using Google TTS
-            gTTS(text=text, lang='en').save(tmp_audio_file.name)
+            comm = edge_tts.Communicate(text=text, voice=VideoMaker.TTS_VOICE)
+            await comm.save(tmp_audio_file.name)
 
-            # Define the TTS clip and it's duration
+            # Define the TTS clip and its duration
             audio_clip = AudioFileClip(tmp_audio_file.name)
             audio_duration = audio_clip.duration
 
@@ -116,7 +112,7 @@ class VideoMaker:
             raise VideoMaker.InvalidScriptError("The first line of the script must be '[START]'.")
         else:
             try:
-                return int(VideoMaker.remove_affix(script.splitlines()[0], ("[", "]")).split(" ")[1])
+                return int(utils.remove_affix(script.splitlines()[0], ("[", "]")).split(" ")[1])
             except IndexError:
                 raise VideoMaker.InvalidScriptError("Duration not defined in '[START]' command. Example: '[START 5]'")
 
@@ -163,7 +159,7 @@ class VideoMaker:
         # Return the updated current time of the video.
         return self.current_time
 
-    def add_espeech_clip(self, emotion_name: str, text: str, duration: float = None) -> float:
+    async def add_espeech_clip(self, emotion_name: str, text: str, duration: float = None) -> float:
         """
         Adds an emotion clip with text-to-speech to the video.
 
@@ -175,7 +171,7 @@ class VideoMaker:
         Returns:
             float: The updated current time of the video.
         """
-        tts_clip, tts_duration = VideoMaker.google_tts_to_clip(text, self.current_time, duration)
+        tts_clip, tts_duration = await VideoMaker.edge_tts_to_clip(text, self.current_time, duration)
         
         # If a duration is not provided, use the duration of the text-to-speech clip.
         emotion_duration = duration if duration else tts_duration
@@ -209,13 +205,14 @@ class VideoMaker:
         # Return the updated current time of the video.
         return self.current_time
 
-    def add_textspeech_clip(self, text: str, duration: float = None, newline_threshold: int = 8) -> float:
+    async def add_textspeech_clip(self, text: str, duration: float = None, newline_threshold: int = 8) -> float:
         """
         Adds a text-to-speech clip to the video using PIL for text rendering.
         Improved error handling and logging added.
         """
         try:
-            tts_clip, tts_duration = VideoMaker.google_tts_to_clip(text, self.current_time, duration)
+            # Await the coroutine to get the actual result
+            tts_clip, tts_duration = await VideoMaker.edge_tts_to_clip(text, self.current_time, duration)
             # Create a PIL Image
             img = Image.new('RGB', (1920, 1080), color='white')
             draw = ImageDraw.Draw(img)
@@ -299,16 +296,13 @@ class VideoMaker:
             except:
                 pass
 
-    def process_script(self):
+    async def process_script(self):
         """
         Process a script into a video.
-
-        :param script: The script to process.
-        :return: None
         """
         # Define a function to parse commands.
         def get_command_parameters(command: str) -> list:
-            return VideoMaker.remove_affix(command, ("[", "]")).split(" ")
+            return utils.remove_affix(command, ("[", "]")).split(" ")
 
         # Read the script.
         script = VideoMaker.read_script(self.script_path)
@@ -322,7 +316,6 @@ class VideoMaker:
 
         # Iterate over each line in the script.
         for line in script.splitlines():
-
             # Check if the line is a end command.
             if line.lower().startswith("[end"):
                 # Get the command parameters.
@@ -349,6 +342,7 @@ class VideoMaker:
                 duration = float(command[2])
                 # Add the emotion clip to the list of clips.
                 self.add_emotion_clip(emotion_name, duration)
+
             # If the line is an espeech command.
             elif line.lower().startswith("[espeech"):
                 # Get the command parameters.
@@ -362,8 +356,9 @@ class VideoMaker:
                 else:
                     duration = float(command[2])
                     text = " ".join(command[3:])
-                # Add the espeech clip to the list of clips.
-                self.add_espeech_clip(emotion_name, text, duration)
+                # Await the espeech clip addition
+                await self.add_espeech_clip(emotion_name, text, duration)
+
             # If the line is an insert command.
             elif line.lower().startswith("[insert"):
                 # Get the command parameters.
@@ -372,6 +367,7 @@ class VideoMaker:
                 video_path = command[1]
                 # Add the insert clip to the list of clips.
                 self.add_insert_clip(video_path)
+
             # If the line is a textspeech command.
             elif line.lower().startswith("[textspeech"):
                 # Get the command parameters.
@@ -383,8 +379,8 @@ class VideoMaker:
                 else:
                     duration = float(command[1])
                     text = " ".join(command[2:])
-                # Add the textspeech clip to the list of clips.
-                self.add_textspeech_clip(text, duration)
+                # Await the textspeech clip addition
+                await self.add_textspeech_clip(text, duration)
 
 def main() -> None:
     """
@@ -404,8 +400,8 @@ def main() -> None:
     # Create a VideoMaker instance.
     video_maker = VideoMaker(args.script_path, args.output_path)
 
-    # Process the script.
-    video_maker.process_script()
+    # Process the script asynchronously
+    asyncio.run(video_maker.process_script())  # Use asyncio.run to await the coroutine
 
 if __name__ == '__main__':
     main()
