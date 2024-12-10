@@ -30,7 +30,7 @@ pip install -r requirements.txt
 1. Create a script file (e.g., `script.txt`) using the custom formatting:
 
 ```
-[START 60]
+[START 60 1920x1080]
 [EMOTION speaking_low 0.5]
 [ESPEECH happy auto] Hello! This is a completely automated video i made using Python.
 [TEXTSPEECH auto] In my current workflow, i write a script and it gets processed into a video.
