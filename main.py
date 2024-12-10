@@ -2,21 +2,25 @@
 
 import argparse
 import tempfile
-from os.path import abspath, dirname
-import os  # Ensure os is imported for os.path.join
-from typing import List, Tuple, Optional
+import os
 import logging
 import sys
 import numpy as np
 import re
 
+import utils
+from utils import CharacterClip
+
+from os.path import abspath, dirname
+from typing import List, Tuple, Optional
+
 from PIL import Image, ImageDraw, ImageFont
 import matplotlib.font_manager as fm
 from gtts import gTTS
 from loguru import logger
-from moviepy import editor as mv
-from moviepy.config import change_settings
-import cv2 as cv # Keep this to force people to install opencv-python
+from moviepy import *
+import cv2 as cv
+
 
 # The star of the show: VideoMaker class.
 class VideoMaker:
@@ -25,21 +29,12 @@ class VideoMaker:
     STATICS_DIR = os.path.join(ROOT_DIR, "statics")  # Correct usage of os.path.join
 
     # Sprite cache.
-    SPRITES = {
-        "anger": mv.ImageClip(os.path.join(CHAR_DIR, "anger.png")),  # Correct usage of os.path.join
-        "anger_screaming": mv.ImageClip(os.path.join(CHAR_DIR, "anger_screaming.png")),  # Correct usage of os.path.join
-        "fearful": mv.ImageClip(os.path.join(CHAR_DIR, "fearful.png")),  # Correct usage of os.path.join
-        "frown": mv.ImageClip(os.path.join(CHAR_DIR, "frown.png")),  # Correct usage of os.path.join
-        "greedy": mv.ImageClip(os.path.join(CHAR_DIR, "greedy.png")),  # Correct usage of os.path.join
-        "happy_screaming": mv.ImageClip(os.path.join(CHAR_DIR, "happy_screaming.png")),  # Correct usage of os.path.join
-        "happy": mv.ImageClip(os.path.join(CHAR_DIR, "happy.png")),  # Correct usage of os.path.join
-        "joy": mv.ImageClip(os.path.join(CHAR_DIR, "joy.png")),  # Correct usage of os.path.join
-        "mischief": mv.ImageClip(os.path.join(CHAR_DIR, "mischief.png")),  # Correct usage of os.path.join
-        "smile": mv.ImageClip(os.path.join(CHAR_DIR, "smile.png")),  # Correct usage of os.path.join
-        "speaking_low": mv.ImageClip(os.path.join(CHAR_DIR, "speaking_low.png")),  # Correct usage of os.path.join
-        "speaking_medium": mv.ImageClip(os.path.join(CHAR_DIR, "speaking_medium.png")),  # Correct usage of os.path.join
-        "worried": mv.ImageClip(os.path.join(CHAR_DIR, "worried.png")),  # Correct usage of os.path.join
-    }
+    SPRITES: dict = utils.load_sprites_recursively(CHAR_DIR)
+    # Tuple of character images
+    CHARACTER_IMAGES: tuple = utils.get_character_images(SPRITES, CHAR_DIR)
+    CHARACTERS: tuple = tuple(SPRITES.keys())
+    # Get a estimate of the character size
+    CHARACTER_AVERAGE_SIZE: tuple = utils.get_character_average_size(CHARACTER_IMAGES)
 
     def __init__(self, script_path: str, output_path: Optional[str] = None) -> None:
         """
@@ -66,7 +61,7 @@ class VideoMaker:
         return text
 
     @staticmethod
-    def google_tts_to_clip(text: str, start_time: float, duration: float = None) -> Tuple[mv.VideoClip, float]:
+    def google_tts_to_clip(text: str, start_time: float, duration: float = None) -> Tuple[VideoClip, float]:
         """
         Convert text to speech using Google TTS and convert it to a MoviePy clip
         with the specified start time and duration.
@@ -77,7 +72,7 @@ class VideoMaker:
             duration (float, optional): Duration of the clip. Defaults to None.
 
         Returns:
-            Tuple[mv.VideoClip, float]: A tuple containing the MoviePy clip and the
+            Tuple[VideoClip, float]: A tuple containing the MoviePy clip and the
                 duration of the clip.
         """
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_audio_file:
@@ -85,7 +80,7 @@ class VideoMaker:
             gTTS(text=text, lang='en').save(tmp_audio_file.name)
 
             # Define the TTS clip and it's duration
-            audio_clip = mv.AudioFileClip(tmp_audio_file.name)
+            audio_clip = AudioFileClip(tmp_audio_file.name)
             audio_duration = audio_clip.duration
 
             if duration is None:
@@ -100,13 +95,13 @@ class VideoMaker:
                 clip_duration = audio_duration
 
             # Create a black video clip with the same duration as the audio clip
-            video_clip = mv.ColorClip(size=(1, 1), color=(0, 0, 0)).set_duration(clip_duration)
+            video_clip = ColorClip(size=(1, 1), color=(0, 0, 0)).with_duration(clip_duration)
 
             # Combine the video and audio clips
-            composite_clip = mv.CompositeVideoClip([video_clip.set_audio(audio_clip)])
+            composite_clip = video_clip.with_audio(audio_clip)
 
             # Set the start time of the clip
-            composite_clip = composite_clip.set_start(start_time)
+            composite_clip = composite_clip.with_start(start_time)
 
             return composite_clip, clip_duration
 
@@ -126,8 +121,8 @@ class VideoMaker:
                 raise VideoMaker.InvalidScriptError("Duration not defined in '[START]' command. Example: '[START 5]'")
 
     @staticmethod
-    def create_initial_background_clip(duration: int) -> mv.ImageClip:
-        return mv.ImageClip(os.path.join(VideoMaker.STATICS_DIR, "bg_white.png")).set_duration(duration)  # Corrected path
+    def create_initial_background_clip(duration: int) -> ImageClip:
+        return ImageClip(os.path.join(VideoMaker.STATICS_DIR, "bg_white.png")).with_duration(duration)  # Corrected path
 
     def add_emotion_clip(self, emotion_name: str, duration: float) -> float:
         """
@@ -141,17 +136,19 @@ class VideoMaker:
             float: The updated current time of the video.
         """
         # Get the emotion clip from the SPRITES dictionary based on the emotion name.
-        emotion_clip = VideoMaker.SPRITES[emotion_name].set_duration(duration)
+        emotion_clip = CharacterClip(emotion_name, duration=duration)
         
         # Calculate the height of the emotion clip by dividing its height by 1.4.
         emotion_height = int(emotion_clip.h // 1.4)
         
         # Resize the emotion clip to the calculated height and set its position to the bottom right of the video.
         # Also apply margins to the emotion clip to position it correctly.
-        emotion_clip = emotion_clip.resize(height=emotion_height).set_position("bottom", "right").margin(bottom=10, opacity=0).margin(left=1500, opacity=0)
+        emotion_clip = emotion_clip.resized(height=emotion_height)\
+            .with_position("bottom", "right")\
+            .with_effects([vfx.Margin(bottom=10, left=1500, opacity=0)])
         
         # Set the start time of the clip to the current time of the video.
-        emotion_clip = emotion_clip.set_start(self.current_time)
+        emotion_clip = emotion_clip.with_start(self.current_time)
         
         # Add the emotion clip to the list of clips.
         self.clips.append(emotion_clip)
@@ -181,17 +178,19 @@ class VideoMaker:
         emotion_duration = duration if duration else tts_duration
         
         # Get the emotion clip from the SPRITES dictionary based on the emotion name.
-        emotion_clip = VideoMaker.SPRITES[emotion_name].set_duration(emotion_duration)
+        emotion_clip = CharacterClip(emotion_name, duration=emotion_duration)
         
         # Calculate the height of the emotion clip by dividing its height by 1.4.
         emotion_height = int(emotion_clip.h // 1.4)
         
         # Resize the emotion clip to the calculated height and set its position to the bottom right of the video.
         # Also apply margins to the emotion clip to position it correctly.
-        emotion_clip = emotion_clip.resize(height=emotion_height).set_position("bottom", "right").margin(bottom=10, opacity=0).margin(left=1500, opacity=0)
+        emotion_clip = emotion_clip.resized(height=emotion_height)\
+            .with_position("bottom", "right")\
+            .with_effects([vfx.Margin(bottom=10, left=1500, opacity=0)])
         
         # Set the start time of the emotion clip to the current time of the video.
-        emotion_clip = emotion_clip.set_start(self.current_time)
+        emotion_clip = emotion_clip.with_start(self.current_time)
         
         # Add the emotion clip and the text-to-speech clip to the list of clips.
         self.clips.append(emotion_clip)
@@ -232,11 +231,11 @@ class VideoMaker:
             # Convert PIL Image to numpy array
             img_array = np.array(img)
             # Create a MoviePy clip from the numpy array
-            text_clip = mv.ImageClip(img_array).set_duration(tts_duration)
+            text_clip = ImageClip(img_array).with_duration(tts_duration)
             # Add fade in and fade out effects
-            text_clip = text_clip.fadeout(0.5).fadein(0.5)
+            text_clip: TextClip = text_clip.with_effects([vfx.FadeOut(0.5), vfx.FadeIn(0.5)])
             # Set the start time and audio
-            text_clip = text_clip.set_start(self.current_time).set_audio(tts_clip.audio)
+            text_clip = text_clip.with_start(self.current_time).with_audio(tts_clip.audio)
             # Add the text clip to the list of clips.
             self.clips.append(text_clip)
             # Update the current time of the video by adding the duration of the text clip.
@@ -258,10 +257,10 @@ class VideoMaker:
             float: The updated current time of the video, which is the current time plus the duration of the inserted video clip.
         """
         # Create a new video clip from the given video file.
-        insert_clip = mv.VideoFileClip(video_path)
+        insert_clip = VideoFileClip(video_path)
 
         # Set the start time of the inserted video clip to the current time of the video.
-        insert_clip = insert_clip.set_start(self.current_time)
+        insert_clip = insert_clip.with_start(self.current_time)
 
         # Add the inserted video clip to the list of clips.
         self.clips.append(insert_clip)
@@ -285,7 +284,7 @@ class VideoMaker:
         """
         try:
             # Create a new CompositeVideoClip from the list of clips.
-            final_video = mv.CompositeVideoClip(self.clips)
+            final_video = CompositeVideoClip(self.clips)
 
             # Export the final video to the given path, with the given fps, using 32 threads and the libx264 codec.
             final_video.write_videofile(save_path, fps=fps, threads=32, codec='libx264')
