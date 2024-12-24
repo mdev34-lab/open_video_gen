@@ -142,16 +142,19 @@ class VideoMaker:
                                     VideoMaker.CHAR_DIR, \
                                     duration=duration)
         
-        # Calculate the character's size based on the resolution.
-        # For example, you can use a fixed ratio of the character's size to the resolution.
-        character_size_ratio = 0.1  # Adjust this value to change the character's size.
-        character_width = int(self.RESOLUTION[0] * character_size_ratio)
-        character_height = int(self.RESOLUTION[1] * character_size_ratio)
+        # Resize the emotion clip using CHARACTER_AVERAGE_SIZE
+        emotion_clip = emotion_clip.resized(VideoMaker.CHARACTER_AVERAGE_SIZE)
         
-        # Resize the emotion clip to the calculated size.
-        emotion_clip = emotion_clip.resized(width=character_width, height=character_height)\
+        # Calculate the height of the emotion clip by dividing its height by 1.4
+        emotion_height = int(emotion_clip.h // 1.4) - 50
+        
+        # Resize the emotion clip to the calculated height and set its position
+        video_width, video_height = self.clips[0].w, self.clips[0].h
+        character_width = emotion_clip.w
+        left_margin = video_width - character_width - 100  # 100 pixels from the right edge
+        emotion_clip = emotion_clip.resized(height=emotion_height)\
             .with_position("bottom", "right")\
-            .with_effects([vfx.Margin(bottom=10, left=1500, opacity=0)])
+            .with_effects([vfx.Margin(bottom=10, left=left_margin, opacity=0)])
         
         # Set the start time of the clip to the current time of the video.
         emotion_clip = emotion_clip.with_start(self.current_time)
@@ -308,7 +311,11 @@ class VideoMaker:
         """
         # Define a function to parse commands.
         def get_command_parameters(command: str) -> list:
-            return utils.remove_affix(command, ("[", "]")).split(" ")
+            cleaned_command = utils.remove_affix(command.split(' ')[0], ("[", "]"))
+            parameters = command[len(cleaned_command)+2:].strip().split(' ')
+            # Clean parameters to remove any trailing brackets
+            parameters = [p.rstrip(']') for p in parameters]
+            return [cleaned_command] + parameters
 
         # Read the script.
         script = VideoMaker.read_script(self.script_path)
@@ -411,4 +418,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
