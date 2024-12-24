@@ -1,0 +1,11 @@
+<video resolution="1920x1080">
+    <background color="lightgrey"/>
+    <emotion name="speaking_low" duration="0.5"/>
+    <espeech emotion="happy" duration="auto">Hello! This is a completely automated video I made using Python.</espeech>
+    <textspeech duration="5">In my current workflow, I write a script and it gets processed into a video.</textspeech>
+    <textspeech duration="5">The script has custom formatting and commands, like ESPEECH, START or END.</textspeech>
+    <espeech emotion="happy_screaming" duration="auto">I hope you like it! For the assets, I used my own scanned sketches.</espeech>
+    <espeech emotion="speaking_low" duration="auto">But the script isn't perfect. For now, it's just a proof of concept.</espeech>
+    <textspeech duration="5">But nevertheless, pretty cool! Goodbye!</textspeech>
+    <end output="video.mp4" fps="12"/>
+</video>

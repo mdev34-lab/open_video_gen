@@ -1,9 +1,0 @@
-[START 60 1920x1080]
-[EMOTION speaking_low 0.5]
-[ESPEECH happy auto] Hello! This is a completely automated video i made using Python.
-[TEXTSPEECH auto] In my current workflow, i write a script and it gets processed into a video.
-[TEXTSPEECH auto] The script has custom formatting and commands, like ESPEECH, START or END.
-[ESPEECH happy_screaming auto] I hope you like it! For the assets i used my own scanned sketches.
-[ESPEECH speaking_low auto] But the script isn't perfect. For now, it's just a proof of concept.
-[TEXTSPEECH auto] But nevertheless, pretty cool! Goodbye!
-[END video.mp4 12]
