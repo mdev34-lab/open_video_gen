@@ -8,6 +8,8 @@ import sys
 import numpy as np
 import re
 import asyncio  # Add this import at the top of your file
+import textwrap  # Import the textwrap module
+import xml.etree.ElementTree as ET
 
 import utils
 from utils import CharacterClip
@@ -106,22 +108,6 @@ class VideoMaker:
             return script_file.read()
 
     @staticmethod
-    def parse_start_command(script: str) -> Tuple[int, Tuple[int, int]]:
-        if not script.splitlines()[0].lower().startswith("[start"):
-            raise VideoMaker.InvalidScriptError("The first line of the script must be '[START]'.")
-        else:
-            try:
-                command = utils.remove_affix(script.splitlines()[0], ("[", "]")).split(" ")
-                duration = int(command[1])
-                if len(command) > 2:
-                    resolution = tuple(map(int, command[2].split("x")))
-                else:
-                    resolution = VideoMaker.RESOLUTION  # Default resolution
-                return duration, resolution
-            except (IndexError, ValueError):
-                raise VideoMaker.InvalidScriptError("Invalid '[START]' command. Example: '[START 5 1920x1080]'")
-
-    @staticmethod
     def create_initial_background_clip(duration: int, resolution: Tuple[int, int]) -> ImageClip:
         return utils.WhiteClip(resolution).with_duration(duration)
 
@@ -214,47 +200,41 @@ class VideoMaker:
         # Return the updated current time of the video.
         return self.current_time
 
-    async def add_textspeech_clip(self, text: str, duration: float = None, newline_threshold: int = 8) -> float:
-        """
-        Adds a text-to-speech clip to the video using PIL for text rendering.
-        Improved error handling and logging added.
-        """
+    async def add_textspeech_clip(self, text: str, duration: float = None, bg_clip: VideoClip = None) -> float:
+        """Adds a text-to-speech clip with dynamic text wrapping."""
         try:
-            # Await the coroutine to get the actual result
             tts_clip, tts_duration = await VideoMaker.edge_tts_to_clip(text, self.current_time, duration)
-            # Create a PIL Image
-            img = Image.new('RGB', VideoMaker.RESOLUTION, color='white')  # Use RESOLUTION constant
+
+            img = Image.fromarray(np.array(bg_clip.get_frame(0)).astype('uint8'))
             draw = ImageDraw.Draw(img)
-            # Load a font
-            font = ImageFont.truetype(self.current_font, 70)
+            font = ImageFont.truetype(self.current_font, 70)  # Keep font size consistent
 
-            # For each newline_threshold words in the text (using .split()), 
-            # insert a newline into the text
-            words = text.split()
-            new_text = ""
-            for i in range(0, len(words), newline_threshold):
-                new_text += " ".join(words[i:i+newline_threshold]) + "\n"
-            text = new_text
+            # Calculate available width for text (with margins)
+            margin = 50  # Adjust margin as needed
+            max_width = VideoMaker.RESOLUTION[0] - 2 * margin
 
-            # Calculate text position to center it
-            text_width, text_height = draw.textbbox((0, 0), text, font=font)[2:]
-            position = ((VideoMaker.RESOLUTION[0] - text_width) / 2, (VideoMaker.RESOLUTION[1] - text_height) / 2)  # Use RESOLUTION constant
-            # Draw the text
-            draw.text(position, text, font=font, fill='black')
-            # Convert PIL Image to numpy array
+            # Wrap the text
+            wrapped_text = textwrap.fill(text, width=int(max_width / (draw.textbbox((0, 0), "A", font=font)[2]-draw.textbbox((0, 0), "", font=font)[2])))
+
+            # Calculate text position to center it vertically as well
+            lines = wrapped_text.splitlines()
+            total_text_height = sum([draw.textbbox((0, 0), line, font=font)[3] for line in lines])
+            y_text = (VideoMaker.RESOLUTION[1] - total_text_height) / 2
+            x_text = VideoMaker.RESOLUTION[0] / 2
+
+            for line in lines:
+                text_width, text_height = draw.textbbox((0, 0), line, font=font)[2:]
+                draw.text((x_text-(text_width/2), y_text), line, font=font, fill='black')
+                y_text += text_height
+
             img_array = np.array(img)
-            # Create a MoviePy clip from the numpy array
             text_clip = ImageClip(img_array).with_duration(tts_duration)
-            # Add fade in and fade out effects
             text_clip: TextClip = text_clip.with_effects([vfx.FadeOut(0.5), vfx.FadeIn(0.5)])
-            # Set the start time and audio
             text_clip = text_clip.with_start(self.current_time).with_audio(tts_clip.audio)
-            # Add the text clip to the list of clips.
             self.clips.append(text_clip)
-            # Update the current time of the video by adding the duration of the text clip.
             self.current_time += tts_duration
-            # Return the updated current time of the video.
             return self.current_time
+
         except Exception as e:
             logger.error(f"Error adding textspeech clip: {e}")
             raise
@@ -306,94 +286,106 @@ class VideoMaker:
                 pass
 
     async def process_script(self):
-        """
-        Process a script into a video.
-        """
-        # Define a function to parse commands.
-        def get_command_parameters(command: str) -> list:
-            cleaned_command = utils.remove_affix(command.split(' ')[0], ("[", "]"))
-            parameters = command[len(cleaned_command)+2:].strip().split(' ')
-            # Clean parameters to remove any trailing brackets
-            parameters = [p.rstrip(']') for p in parameters]
-            return [cleaned_command] + parameters
+        """Process an XML script into a video."""
+        try:
+            tree = ET.parse(self.script_path)
+            root = tree.getroot()
 
-        # Read the script.
-        script = VideoMaker.read_script(self.script_path)
-        # Get the initial background duration from the script.
-        initial_duration, VideoMaker.RESOLUTION = VideoMaker.parse_start_command(script)
-        # Create the initial background clip.
-        bg_clip = VideoMaker.create_initial_background_clip(initial_duration, VideoMaker.RESOLUTION)
-        video_width, video_height = bg_clip.size  # Get video dimensions
-        # Add the background clip to the list of clips.
-        self.clips.append(bg_clip)
+            if root.tag != "video":
+                raise VideoMaker.InvalidScriptError("Root element must be <video>")
 
-        # Iterate over each line in the script.
-        for line in script.splitlines():
-            # Check if the line is a end command.
-            if line.lower().startswith("[end"):
-                # Get the command parameters.
-                command = get_command_parameters(line)
-                # If the output path wasn't specified, use the one in the script.
-                if not self.output_path:
-                    self.output_path = abspath(command[1])
-                # Get the frames per second to export the video at.
-                fps = int(command[2])
-                # Export the final video.
-                self.export_final_video(self.output_path, fps)
+            resolution_str = root.get("resolution", "1920x1080")  # Default resolution
+            try:
+                VideoMaker.RESOLUTION = tuple(map(int, resolution_str.split("x")))
+            except ValueError:
+                raise VideoMaker.InvalidScriptError("Invalid resolution format (e.g., 1920x1080)")
 
-            # If the line is empty, skip it.
-            elif line.lower().strip() == "":
-                continue
+            bg_clip = utils.WhiteClip(VideoMaker.RESOLUTION).with_duration(0) # Initial background clip
+            self.clips.append(bg_clip)
+            max_end_time = 0
 
-            # If the line is an emotion command.
-            elif line.lower().startswith("[emotion"):
-                # Get the command parameters.
-                command = get_command_parameters(line)
-                # Get the name of the emotion to play.
-                emotion_name = command[1]
-                # Get the duration of the emotion to play.
-                duration = float(command[2])
-                # Add the emotion clip to the list of clips.
-                self.add_emotion_clip(emotion_name, duration)
+            for element in root:
+                if element.tag == "emotion":
+                    name = element.get("name")
+                    duration = float(element.get("duration"))
+                    self.add_emotion_clip(name, duration)
+                    max_end_time = max(max_end_time, self.current_time)
 
-            # If the line is an espeech command.
-            elif line.lower().startswith("[espeech"):
-                # Get the command parameters.
-                command = get_command_parameters(line)
-                # Get the name of the emotion to play.
-                emotion_name = command[1]
-                # If the duration is "auto", don't specify a duration.
-                if command[2] == "auto":
-                    duration = None
-                    text = " ".join(command[3:])
+                elif element.tag == "espeech":
+                    emotion = element.get("emotion")
+                    duration_str = element.get("duration", "auto")
+                    duration = float(duration_str) if duration_str != "auto" else None
+                    text = element.text.strip()
+                    await self.add_espeech_clip(emotion, text, duration)
+                    max_end_time = max(max_end_time, self.current_time)
+
+                elif element.tag == "insert":
+                    path = element.get("path")
+                    self.add_insert_clip(path)
+                    max_end_time = max(max_end_time, self.current_time)
+
+                elif element.tag == "textspeech":
+                    duration_str = element.get("duration", "auto")
+                    duration = float(duration_str) if duration_str != "auto" else None
+                    text = element.text.strip()
+                    await self.add_textspeech_clip(text, duration, bg_clip)
+                    max_end_time = max(max_end_time, self.current_time)
+
+                elif element.tag == "end":
+                    output_path = element.get("output", "output.mp4") # Default output
+                    fps = int(element.get("fps", 24)) # Default FPS
+                    self.clips[0] = self.clips[0].with_duration(max_end_time)
+                    self.export_final_video(output_path, fps)
+                    return # Exit after exporting
+                elif element.tag == "background":
+                    color = element.get("color", "white")
+                    rgb_color = self.get_rgb_color(color)
+                    bg_clip = utils.ColorClip(VideoMaker.RESOLUTION, rgb_color).with_duration(0)
+                    self.clips[0] = bg_clip
+                elif element.tag == "start":
+                    pass
                 else:
-                    duration = float(command[2])
-                    text = " ".join(command[3:])
-                # Await the espeech clip addition
-                await self.add_espeech_clip(emotion_name, text, duration)
+                    logger.warning(f"Unknown element: {element.tag}")
+            self.clips[0] = self.clips[0].with_duration(max_end_time)
+            self.export_final_video("output.mp4", 24)
 
-            # If the line is an insert command.
-            elif line.lower().startswith("[insert"):
-                # Get the command parameters.
-                command = get_command_parameters(line)
-                # Get the path to the video to insert.
-                video_path = command[1]
-                # Add the insert clip to the list of clips.
-                self.add_insert_clip(video_path)
+        except ET.ParseError as e:
+            raise VideoMaker.InvalidScriptError(f"XML parsing error: {e}")
+        except FileNotFoundError:
+            raise VideoMaker.InvalidScriptError(f"Script file not found: {self.script_path}")
+        except ValueError as e: # Handle invalid float conversions
+            raise VideoMaker.InvalidScriptError(f"Invalid value in script: {e}")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred: {e}")
+            raise
 
-            # If the line is a textspeech command.
-            elif line.lower().startswith("[textspeech"):
-                # Get the command parameters.
-                command = get_command_parameters(line)
-                # If the duration is "auto", don't specify a duration.
-                if command[1] == "auto":
-                    duration = None
-                    text = " ".join(command[2:])
-                else:
-                    duration = float(command[1])
-                    text = " ".join(command[2:])
-                # Await the textspeech clip addition
-                await self.add_textspeech_clip(text, duration)
+    @staticmethod
+    def get_rgb_color(color_name: str) -> tuple:
+        def convert_to_rgb(color: str):
+            color = color.lstrip('#')
+            r = int(color[:2], 16)
+            g = int(color[2:4], 16)
+            b = int(color[4:6], 16)
+            return (r, g, b)
+
+        if color_name.lower().startswith("#"): return convert_to_rgb(color_name)
+
+        colors = {
+            "black": (0, 0, 0),
+            "white": (255, 255, 255),
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+            "yellow": (255, 255, 0),
+            "cyan": (0, 255, 255),
+            "magenta": (255, 0, 255),
+            "lightgrey": (200, 200, 200),
+        }
+        return colors.get(color_name.lower(), (255, 255, 255))  # Default to white if color not found
+
+    class InvalidScriptError(Exception):
+        """Custom exception for invalid script format."""
+        pass
 
 def main() -> None:
     """
