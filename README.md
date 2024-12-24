@@ -27,36 +27,35 @@ pip install -r requirements.txt
 
 ## Usage
 
-1. Create a script file (e.g., `script.txt`) using the custom formatting:
+1. Create a script file (e.g., `script.xml`) using the custom formatting:
 
 ```
-[START 60 1920x1080]
-[EMOTION speaking_low 0.5]
-[ESPEECH happy auto] Hello! This is a completely automated video i made using Python.
-[TEXTSPEECH auto] In my current workflow, i write a script and it gets processed into a video.
-[TEXTSPEECH auto] The script has custom formatting and commands, like ESPEECH, START or END.
-[ESPEECH happy_screaming auto] I hope you like it! For the assets i used my own scanned sketches.
-[ESPEECH speaking_low auto] But the script isn't perfect. For now, it's just a proof of concept.
-[TEXTSPEECH auto] But nevertheless, pretty cool! Goodbye!
-[END video.mp4 12]
+<video resolution="1080x1920">
+    <background color="lightgrey"/>
+    <emotion name="happy" duration="2"/>
+    <espeech emotion="speaking_low" duration="auto">Hmm, let me think about that.</espeech>
+    <textspeech duration="5">This is some text that will wrap.</textspeech>
+    <emotion name="joy" duration="3"/>
+    <end output="my_video.mp4" fps="30"/>
+</video>
 ```
 
 2. Run the OpenVideoGen script:
 
 ```
-python openvideogen.py script.txt
+python openvideogen.py script.xml
 ```
 
-3. The generated video will be saved as `video.mp4` in the output directory.
+3. The generated video will be saved in the output directory specified in your script file.
 
-## Script Commands
+## Script Tags
 
-- `[START duration <width>x<height>]`: Begins the video with specified duration in seconds (mandatory) and resolution (optional)
-- `[INSERT filepath]`: Insert the specified sub-video into the video (not tested)
-- `[EMOTION type intensity]`: Sets the emotion for the following lines
-- `[ESPEECH style auto]`: Applies emotional speech with specified style
-- `[TEXTSPEECH auto]`: Converts text to speech
-- `[END filename duration]`: Ends the video, specifying output filename and duration
+- `<video resolution="1920x1080">`: Root tag for the script file. Resolution may be specified (optional). Must be closed.
+- `<insert path="path/to/video.mp4"/>`: Insert the specified sub-video into the video (not tested)
+- `<emotion name="happy" duration="2"/>`: Displays the specified sprite for the specified duration.
+- `<espeech emotion="happy" duration="auto">`: Applies TTS with specified sprite with specified duration (default "auto" or an integer). Must be closed.
+- `<textspeech duration="5">`: Applies TTS while showing text on the screen. Duration is "auto" (default) or an integer. Must be closed.
+- `<end output="my_video.mp4" fps="30"/>`: Ends the video, specifying output filename and FPS (both mandatory)
 
 ## License
 
